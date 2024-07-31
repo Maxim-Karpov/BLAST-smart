@@ -76,6 +76,7 @@ There are two main stages in the BLAST process: database caching (storage drive 
 - out.hits_only.txt - a single header, tab-separated file containing all of the matches
 
 ## Future implementations
-  1) Ability to run other types of BLAST searches.
-  2) Database de-installation script.
-  3) Correction of the output to correctly match the user designated ```-max_hsps``` parameter.
+  1) Improved filtering and logic of the output.
+  2) Ability to run other types of BLAST searches.
+  3) Database de-installation script.
+  4) Correction of the output to correctly match the user designated ```-max_hsps``` parameter.
