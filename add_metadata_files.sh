@@ -1,81 +1,68 @@
-#!/bin/bash
+#!/usr/bin/env bash
+#
+# Prepares each extracted database volume so it can be searched on its own:
+#  - writes a single-volume alias file (<db>.nal or <db>.pal) in every volume directory
+#  - links the database-wide files that NCBI ships only with the first volume
+#    (sequence ID/taxonomy lookup files, taxdb) into every other volume directory
+#
+# Volume names are read from the extracted files, so this works for any number of
+# volumes and for 2- or 3-digit volume numbering (nt, core_nt, nr, ...).
+#
+# Usage: bash add_metadata_files.sh [nt|core_nt|nr]
 
-read -p "Which database would you like to enrich with metadata? (nt/nr):" database
-
-while ! [[ $database == "nt" ]] && ! [[ $database == "nr" ]];
-	do
-	read -p "Please name the appropriate database to enrich with metadata (nt/nr):" database
-	wait
+database=$1
+while [[ $database != "nt" && $database != "core_nt" && $database != "nr" ]]; do
+	read -r -p "Which database would you like to enrich with metadata? (nt/core_nt/nr): " database || exit 1
 done
 
-
-if [[ $database == "nt" ]]; then
-
-counter=0
-for FILE in ${database}.*.tar.gz;
-do
-cd ${FILE}_dir
-
-if [[ -f ${database}.nal ]]; then
-	rm ${database}.nal
+shopt -s nullglob
+vols=( "${database}".*.tar.gz_dir )
+if (( ${#vols[@]} == 0 )); then
+	echo "ERROR: no ${database}.*.tar.gz_dir directories found in $(pwd). Run extract_db.sh first." >&2
+	exit 1
 fi
 
-touch ${database}.nal
+first="$(pwd)/${vols[0]}"
 
-if [[ "$counter" -le 9 ]]; then
-	printf "#\n# Alias file created: Apr 1, 2024  7:29 PM\n#\nTITLE Nucleotide collection (${database})\nDBLIST ${database}.00${counter}" >> ${database}.nal
-	counter=$((counter+1))	
-elif [[ "$counter" -le 99 ]]; then
-	printf "#\n# Alias file created: Apr 1, 2024  7:29 PM\n#\nTITLE Nucleotide collection (${database})\nDBLIST ${database}.0${counter}" >> ${database}.nal
-	counter=$((counter+1))
-else
-	printf "#\n# Alias file created: Apr 1, 2024  7:29 PM\n#\nTITLE Nucleotide collection (${database})\nDBLIST ${database}.${counter}" >> ${database}.nal
-	counter=$((counter+1))
+#Nucleotide (n) or protein (p) database?
+seqfile=( "$first"/*.nsq "$first"/*.psq )
+if (( ${#seqfile[@]} == 0 )); then
+	echo "ERROR: no .nsq/.psq file in ${vols[0]} - was it extracted completely?" >&2
+	exit 1
 fi
-cd ..
-ln -s -f $(pwd)/${database}.000.tar.gz_dir/${database}.ndb $(pwd)/${FILE}_dir/${database}.ndb
-ln -s -f $(pwd)/${database}.000.tar.gz_dir/${database}.nos $(pwd)/${FILE}_dir/${database}.nos
-ln -s -f $(pwd)/${database}.000.tar.gz_dir/${database}.ntf $(pwd)/${FILE}_dir/${database}.ntf
-ln -s -f $(pwd)/${database}.000.tar.gz_dir/${database}.not $(pwd)/${FILE}_dir/${database}.not
-ln -s -f $(pwd)/${database}.000.tar.gz_dir/${database}.nto $(pwd)/${FILE}_dir/${database}.nto
-ln -s -f $(pwd)/${database}.000.tar.gz_dir/taxdb.btd $(pwd)/${FILE}_dir/taxdb.btd
-ln -s -f $(pwd)/${database}.000.tar.gz_dir/taxdb.bti $(pwd)/${FILE}_dir/taxdb.bti
-ln -s -f $(pwd)/${database}.000.tar.gz_dir/taxonomy4blast.sqlite3 $(pwd)/${FILE}_dir/taxonomy4blast.sqlite3
+[[ ${seqfile[0]} == *.psq ]] && t=p || t=n
+first_volname=$(basename "${seqfile[0]%.*}")
+
+#Database-wide files that live only in the first volume
+shared=()
+for f in "$first/${database}".* "$first"/taxdb.* "$first"/taxonomy4blast.sqlite3; do
+	[[ -e $f ]] || continue
+	name=$(basename "$f")
+	[[ $name == "${first_volname}".* ]] && continue      # belongs to the first volume itself
+	[[ $name == "${database}.${t}al" ]] && continue       # alias file, written below
+	shared+=( "$name" )
 done
 
+count=0
+for vol in "${vols[@]}"; do
+	dir="$(pwd)/$vol"
+	volseq=( "$dir"/*."${t}sq" )
+	if (( ${#volseq[@]} == 0 )); then
+		echo "ERROR: no .${t}sq file in $vol - skipping it." >&2
+		continue
+	fi
+	volname=$(basename "${volseq[0]%.*}")
 
-elif [[ $database == "nr" ]]; then
+	#Single-volume alias file, so that "-db $database" inside this directory searches this volume only
+	printf "#\n# Alias file created by BLAST-smart add_metadata_files.sh on %s\n#\nTITLE %s (volume %s)\nDBLIST %s\n" \
+		"$(date)" "$database" "$volname" "$volname" > "$dir/${database}.${t}al"
 
-counter=0
-for FILE in ${database}.*.tar.gz;
-do
-cd ${FILE}_dir
-
-if [[ -f ${database}.pal ]]; then
-	rm ${database}.pal
-fi
-
-touch ${database}.pal
-
-if [[ "$counter" -le 9 ]]; then
-	printf "#\n# Alias file created 04/11/2024 04:54:09\n#\nTITLE All non-redundant GenBank CDS translations+PDB+SwissProt+PIR+PRF excluding environmental samples from WGS projects\nDBLIST ${database}.0${counter}\nNSEQ 721436858\nLENGTH 278554112155" >> ${database}.pal
-	counter=$((counter+1))	
-elif [[ "$counter" -le 99 ]]; then
-	printf "#\n# Alias file created 04/11/2024 04:54:09\n#\nTITLE All non-redundant GenBank CDS translations+PDB+SwissProt+PIR+PRF excluding environmental samples from WGS projects\nDBLIST ${database}.${counter}\nNSEQ 721436858\nLENGTH 278554112155" >> ${database}.pal
-	counter=$((counter+1))
-else
-	printf "#\n# Alias file created 04/11/2024 04:54:09\n#\nTITLE All non-redundant GenBank CDS translations+PDB+SwissProt+PIR+PRF excluding environmental samples from WGS projects\nDBLIST ${database}.${counter}\nNSEQ 721436858\nLENGTH 278554112155" >> ${database}.pal
-	counter=$((counter+1))
-fi
-cd ..
-ln -s -f $(pwd)/${database}.00.tar.gz_dir/${database}.pdb $(pwd)/${FILE}_dir/${database}.pdb
-ln -s -f $(pwd)/${database}.00.tar.gz_dir/${database}.pos $(pwd)/${FILE}_dir/${database}.pos
-ln -s -f $(pwd)/${database}.00.tar.gz_dir/${database}.ptf $(pwd)/${FILE}_dir/${database}.ptf
-ln -s -f $(pwd)/${database}.00.tar.gz_dir/${database}.pot $(pwd)/${FILE}_dir/${database}.pot
-ln -s -f $(pwd)/${database}.00.tar.gz_dir/${database}.pto $(pwd)/${FILE}_dir/${database}.pto
-ln -s -f $(pwd)/${database}.00.tar.gz_dir/taxdb.btd $(pwd)/${FILE}_dir/taxdb.btd
-ln -s -f $(pwd)/${database}.00.tar.gz_dir/taxdb.bti $(pwd)/${FILE}_dir/taxdb.bti
-ln -s -f $(pwd)/${database}.00.tar.gz_dir/taxonomy4blast.sqlite3 $(pwd)/${FILE}_dir/taxonomy4blast.sqlite3
+	if [[ $dir != "$first" ]]; then
+		for name in "${shared[@]}"; do
+			ln -s -f "$first/$name" "$dir/$name"
+		done
+	fi
+	count=$((count + 1))
 done
-fi
 
+echo "Metadata added to $count volume(s) of $database."
